@@ -74,7 +74,7 @@ namespace Speedtest
 		public static IEnumerable<long> RemoveUpperOutliers(this IEnumerable<long> set)
 		{
 			var avg = set.Average();
-			var sd = set.StdDev();
+			var sd = Math.Sqrt(Variance());
 
 			foreach (var i in set)
 			{
@@ -82,6 +82,26 @@ namespace Speedtest
 				{
 					yield return i;
 				}
+			}
+
+			double Variance()
+			{
+				double mean = avg, sumSq = 0;
+				var n = 0;
+
+				foreach (var i in set)
+				{
+					var delta = i - mean;
+					sumSq += delta * delta;
+					n++;
+				}
+
+				if (n <= 1)
+				{
+					return 0;
+				}
+
+				return sumSq / (n - 1);
 			}
 		}
 	}
