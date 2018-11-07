@@ -78,7 +78,7 @@ namespace Speedtest
 
 			foreach (var i in set)
 			{
-				if (i > 0 || i - avg <= sd)
+				if (i > 0 && i - avg <= sd)
 				{
 					yield return i;
 				}
