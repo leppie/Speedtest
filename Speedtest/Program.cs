@@ -17,13 +17,13 @@ namespace Speedtest
 		public int DownloadTime { get; set; } = 5000;
 		public int DownloadConnections { get; set; } = 6;
 		public int BufferSize { get; set; } = 4096;
-		public int PingCount { get; set; } = 10;
+		public int PingCount { get; set; } = 20;
 		public string[] Servers { get; set; } = { };
 		public string Search { get; set; }
 		public bool Debug { get; set; } = false;
 		public bool Interactive { get; set; } = true;
 		public int CandidateCount { get; set; } = 8;
-		public int CandidatePingCount { get; set; } = 5;
+		public int CandidatePingCount { get; set; } = 8;
 		public int CandidateTests { get; set; } = 1;
 
 		public override string ToString()
@@ -208,7 +208,7 @@ namespace Speedtest
 				if (Settings.Interactive)
 				{
 					Console.CursorVisible = false;
-					Update($"{ping,6:f1} ms | ");
+					Update($"{ping,6:f1} ms | {0,8} kbit | {server}");
 				}
 
 				using (var client = new HttpClient())
@@ -332,22 +332,22 @@ namespace Speedtest
 				var url = new Uri("https://" + host);
 
 				// sent dummy ping to ensure DNS is resolved
-				await ping.SendPingAsync(url.Host);
+				var initial = await ping.SendPingAsync(url.Host, 1000);
+
+				if (initial.Status != IPStatus.Success)
+				{
+					if (Settings.Debug)
+					{
+						Console.WriteLine($"ping error ({initial.Status}): {host}");
+					}
+
+					return double.MaxValue;
+				}
 
 				var pc = pingCount;
 				while (pc-- > 0)
 				{
 					var reply = await ping.SendPingAsync(url.Host, 1000);
-					if (reply.Status != IPStatus.Success)
-					{
-						if (Settings.Debug)
-						{
-							Console.WriteLine($"ping error ({reply.Status}): {host}");
-						}
-
-						return double.MaxValue;
-					}
-
 					pingTimes[pc] = reply.RoundtripTime;
 				}
 
