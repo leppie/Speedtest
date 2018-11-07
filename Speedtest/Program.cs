@@ -23,7 +23,7 @@ namespace Speedtest
 		public bool Debug { get; set; } = false;
 		public bool Interactive { get; set; } = true;
 		public int CandidateCount { get; set; } = 8;
-		public int CandidatePingCount { get; set; } = 8;
+		public int CandidatePingMax { get; set; } = 8;
 		public int CandidateTests { get; set; } = 1;
 
 		public override string ToString()
@@ -34,7 +34,7 @@ namespace Speedtest
 {nameof(BufferSize),-24}: {BufferSize}
 {nameof(PingCount),-24}: {PingCount}
 {nameof(CandidateCount),-24}: {CandidateCount}
-{nameof(CandidatePingCount),-24}: {CandidatePingCount}
+{nameof(CandidatePingMax),-24}: {CandidatePingMax}
 {nameof(CandidateTests),-24}: {CandidateTests}
 {nameof(Debug),-24}: {Debug}
 {nameof(Interactive),-24}: {Interactive}
@@ -304,7 +304,7 @@ namespace Speedtest
 
 				foreach (var server in servers.Take(Settings.CandidateCount))
 				{
-					server.ping = await GetPing(server.host, Settings.CandidatePingCount, true);
+					server.ping = await GetPing(server.host, Settings.CandidatePingMax, 750);
 				}
 
 				servers = servers.OrderBy(x => x.ping).Take(Settings.CandidateCount).Where(x => x.ping < double.MaxValue).ToList();
@@ -323,15 +323,12 @@ namespace Speedtest
 			}
 		}
 
-		private static async Task<double> GetPing(string host, int pingCount, bool removeOutliers = true)
+		private static async Task<double> GetPing(string host, int pingCount, int pingTimeLimit = 2000, bool removeOutliers = true)
 		{
-			var pingTimes = new long[pingCount];
-
 			using (var ping = new Ping())
 			{
 				var url = new Uri("https://" + host);
 
-				// sent dummy ping to ensure DNS is resolved
 				var initial = await ping.SendPingAsync(url.Host, 1000);
 
 				if (initial.Status != IPStatus.Success)
@@ -344,7 +341,14 @@ namespace Speedtest
 					return double.MaxValue;
 				}
 
+				// adjust max ping count so it does not take too long
+				pingCount = (int) Math.Min(pingCount, pingTimeLimit / initial.RoundtripTime);
+
+				var pingTimes = new long[pingCount];
 				var pc = pingCount;
+
+				pingTimes[--pc] = initial.RoundtripTime;
+
 				while (pc-- > 0)
 				{
 					var reply = await ping.SendPingAsync(url.Host, 1000);
@@ -366,9 +370,9 @@ namespace Speedtest
 							$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
 					}
 				}
-			}
 
-			return pingTimes.Average();
+				return pingTimes.Average();
+			}
 		}
 
 		static string GetUrl(string server, Guid guid)
