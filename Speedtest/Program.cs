@@ -22,6 +22,9 @@ namespace Speedtest
 		public string Search { get; set; }
 		public bool Debug { get; set; } = false;
 		public bool Interactive { get; set; } = true;
+		public int CandidateCount { get; set; } = 8;
+		public int CandidatePingCount { get; set; } = 5;
+		public int CandidateTests { get; set; } = 1;
 
 		public override string ToString()
 		{
@@ -30,6 +33,9 @@ namespace Speedtest
 {nameof(DownloadConnections),-24}: {DownloadConnections}
 {nameof(BufferSize),-24}: {BufferSize}
 {nameof(PingCount),-24}: {PingCount}
+{nameof(CandidateCount),-24}: {CandidateCount}
+{nameof(CandidatePingCount),-24}: {CandidatePingCount}
+{nameof(CandidateTests),-24}: {CandidateTests}
 {nameof(Debug),-24}: {Debug}
 {nameof(Interactive),-24}: {Interactive}
 {nameof(Search),-24}: ""{Search}""
@@ -84,7 +90,7 @@ namespace Speedtest
 	{
 		static readonly Settings Settings = new Settings();
 
-		class Server
+		class Server : IEquatable<Server>
 		{
 			public string cc { get; set; }
 			public string country { get; set; }
@@ -94,9 +100,67 @@ namespace Speedtest
 			public string sponsor { get; set; }
 			public string name { get; set; }
 
+			public double ping { get; set; } = double.MaxValue;
+
 			public override string ToString()
 			{
-				return $"{sponsor,-36}: {host}";
+				return $"{sponsor,-36} ({ping,6:f1} ms): {host}";
+			}
+
+			public bool Equals(Server other)
+			{
+				if (ReferenceEquals(null, other))
+				{
+					return false;
+				}
+
+				if (ReferenceEquals(this, other))
+				{
+					return true;
+				}
+
+				return string.Equals(host, other.host) && string.Equals(sponsor, other.sponsor) && string.Equals(name, other.name);
+			}
+
+			public override bool Equals(object obj)
+			{
+				if (ReferenceEquals(null, obj))
+				{
+					return false;
+				}
+
+				if (ReferenceEquals(this, obj))
+				{
+					return true;
+				}
+
+				if (obj.GetType() != this.GetType())
+				{
+					return false;
+				}
+
+				return Equals((Server) obj);
+			}
+
+			public override int GetHashCode()
+			{
+				unchecked
+				{
+					var hashCode = (host != null ? host.GetHashCode() : 0);
+					hashCode = (hashCode * 397) ^ (sponsor != null ? sponsor.GetHashCode() : 0);
+					hashCode = (hashCode * 397) ^ (name != null ? name.GetHashCode() : 0);
+					return hashCode;
+				}
+			}
+
+			public static bool operator ==(Server left, Server right)
+			{
+				return Equals(left, right);
+			}
+
+			public static bool operator !=(Server left, Server right)
+			{
+				return !Equals(left, right);
 			}
 		}
 
@@ -118,8 +182,8 @@ namespace Speedtest
 			if (Settings.Servers.Length == 0)
 			{
 				var servers = await GetServers(Settings.Search);
-				var candidate = servers.FirstOrDefault(x => x.https_functional == 1)?.host;
-				if (candidate == null)
+				var candidates = servers.Take(Settings.CandidateTests);
+				if (!candidates.Any())
 				{
 					Console.Error.WriteLine($"Could not find server: {Settings.Search}");
 					return 1;
@@ -127,10 +191,10 @@ namespace Speedtest
 
 				if (Settings.Debug)
 				{
-					Console.WriteLine($"Auto Server: {candidate}");
+					Console.WriteLine($"Auto Server(s): {string.Join(", ", candidates.Select(x => x.sponsor))}");
 				}
 
-				args = new[] { candidate };
+				args = candidates.Select(x => x.host).ToArray();
 			}
 			else
 			{
@@ -139,38 +203,12 @@ namespace Speedtest
 			
 			foreach (var server in args)
 			{
-				var pingTimes = new long[Settings.PingCount];
-
-				var ping = new Ping();
-				var url = new Uri("https://" + server);
-
-				// sent dummy ping to ensure DNS is resolved
-				await ping.SendPingAsync(url.Host);
-
-				var pc = Settings.PingCount;
-				while (pc-- > 0)
-				{
-					var reply = await ping.SendPingAsync(url.Host);
-					pingTimes[pc] = reply.RoundtripTime;
-				}
-
-				if (Settings.Debug)
-				{
-					Console.WriteLine($"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} data: [{string.Join(",", pingTimes)}]");
-				}
-
-				pingTimes = pingTimes.RemoveUpperOutliers().ToArray();
-
-				if (Settings.Debug)
-				{
-					Console.WriteLine(
-						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
-				}
+				var ping = await GetPing(server, Settings.PingCount);
 
 				if (Settings.Interactive)
 				{
 					Console.CursorVisible = false;
-					Update($"{pingTimes.Average(),6:f1} ms | ");
+					Update($"{ping,6:f1} ms | ");
 				}
 
 				using (var client = new HttpClient())
@@ -203,7 +241,7 @@ namespace Speedtest
 
 					var elapsed = sw.ElapsedMilliseconds;
 
-					Update($"{pingTimes.Average(),6:f1} ms | {(counts.Sum() * 8) / elapsed,8} kbit | {server}");
+					Update($"{ping,6:f1} ms | {(counts.Sum() * 8) / elapsed,8} kbit | {server}");
 					Console.WriteLine();
 
 					if (Settings.Interactive)
@@ -243,13 +281,34 @@ namespace Speedtest
 			Console.Write(msg);
 		}
 
-		private static async Task<Server[]> GetServers(string search)
+		private static async Task<IEnumerable<Server>> GetServers(string search)
 		{
 			var url = $"https://www.speedtest.net/api/js/servers?search={search}";
 			using (var client = new HttpClient())
 			{
 				var result = await client.GetStringAsync(url);
-				var servers = JsonConvert.DeserializeObject<Server[]>(result);
+				var allservers = new List<Server>(JsonConvert.DeserializeObject<Server[]>(result));
+
+				var check = new HashSet<Server>();
+
+				var servers = new List<Server>();
+
+				foreach (var server in allservers)
+				{
+					if (server.https_functional == 1 && !check.Contains(server))
+					{
+						servers.Add(server);
+						check.Add(server);
+					}
+				}
+
+				foreach (var server in servers.Take(Settings.CandidateCount))
+				{
+					server.ping = await GetPing(server.host, Settings.CandidatePingCount, true);
+				}
+
+				servers = servers.OrderBy(x => x.ping).Take(Settings.CandidateCount).Where(x => x.ping < double.MaxValue).ToList();
+
 				if (Settings.Debug)
 				{
 					Console.WriteLine($"Server search: {search}");
@@ -262,6 +321,54 @@ namespace Speedtest
 
 				return servers;
 			}
+		}
+
+		private static async Task<double> GetPing(string host, int pingCount, bool removeOutliers = true)
+		{
+			var pingTimes = new long[pingCount];
+
+			using (var ping = new Ping())
+			{
+				var url = new Uri("https://" + host);
+
+				// sent dummy ping to ensure DNS is resolved
+				await ping.SendPingAsync(url.Host);
+
+				var pc = pingCount;
+				while (pc-- > 0)
+				{
+					var reply = await ping.SendPingAsync(url.Host, 1000);
+					if (reply.Status != IPStatus.Success)
+					{
+						if (Settings.Debug)
+						{
+							Console.WriteLine($"ping error ({reply.Status}): {host}");
+						}
+
+						return double.MaxValue;
+					}
+
+					pingTimes[pc] = reply.RoundtripTime;
+				}
+
+				if (Settings.Debug)
+				{
+					Console.WriteLine(
+						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} data: [{string.Join(",", pingTimes)}]");
+				}
+
+				if (removeOutliers)
+				{
+					pingTimes = pingTimes.RemoveUpperOutliers().ToArray();
+					if (Settings.Debug)
+					{
+						Console.WriteLine(
+							$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
+					}
+				}
+			}
+
+			return pingTimes.Average();
 		}
 
 		static string GetUrl(string server, Guid guid)
