@@ -71,14 +71,14 @@ namespace Speedtest
 			return Math.Sqrt(set.Variance());
 		}
 
-		public static IEnumerable<long> RemoveUpperOutliers(this IEnumerable<long> set)
+		public static IEnumerable<long> RemoveUpperOutliers(this long[] set)
 		{
 			var avg = set.Average();
 			var sd = Math.Sqrt(Variance());
 
 			foreach (var i in set)
 			{
-				if (i - avg <= sd)
+				if (i > 0 || i - avg <= sd)
 				{
 					yield return i;
 				}
@@ -202,7 +202,7 @@ namespace Speedtest
 			if (Settings.Servers.Length == 0)
 			{
 				var servers = await GetServers(Settings.Search);
-				var candidates = servers.Take(Settings.CandidateTests);
+				var candidates = servers.Take(Settings.CandidateTests).ToArray();
 				if (!candidates.Any())
 				{
 					Console.Error.WriteLine($"Could not find server: {Settings.Search}");
@@ -325,6 +325,22 @@ namespace Speedtest
 				foreach (var server in servers.Take(Settings.CandidateCount))
 				{
 					server.ping = await GetPing(server.host, Settings.CandidatePingMax, 750);
+					if (server.ping < double.MaxValue)
+					{
+						try
+						{
+							await client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid()));
+						}
+						catch (Exception e)
+						{
+							if (Settings.Debug)
+							{
+								Console.WriteLine(e);
+							}
+
+							server.ping = double.MaxValue;
+						}
+					}
 				}
 
 				servers = servers.OrderBy(x => x.ping).Take(Settings.CandidateCount).Where(x => x.ping < double.MaxValue).ToList();
@@ -343,7 +359,7 @@ namespace Speedtest
 			}
 		}
 
-		private static async Task<double> GetPing(string host, int pingCount, int pingTimeLimit = 2000, bool removeOutliers = true)
+		private static async Task<double> GetPing(string host, int pingCount, int pingTimeLimit = 2000)
 		{
 			using (var ping = new Ping())
 			{
@@ -381,17 +397,14 @@ namespace Speedtest
 						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} data: [{string.Join(",", pingTimes)}]");
 				}
 
-				if (removeOutliers)
+				pingTimes = pingTimes.RemoveUpperOutliers().ToArray();
+				if (Settings.Debug)
 				{
-					pingTimes = pingTimes.RemoveUpperOutliers().ToArray();
-					if (Settings.Debug)
-					{
-						Console.WriteLine(
-							$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
-					}
+					Console.WriteLine(
+						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
 				}
 
-				return pingTimes.Average();
+				return pingTimes.Where(x => x != 0).Average();
 			}
 		}
 
