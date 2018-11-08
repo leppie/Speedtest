@@ -197,13 +197,13 @@ namespace Speedtest
 			return !results.Any() ? 1 : 0;
 		}
 
-		public static async Task<IEnumerable<(double ping, long kbit, string host)>> Run(IConfiguration configuration)
+		public static async Task<IEnumerable<Result>> Run(IConfiguration configuration)
 		{
 			string[] args = { };
 
 			configuration.Bind(Settings);
 
-			var results = new List<(double ping, long kbit, string host)>();
+			var results = new List<Result>();
 
 			if (Settings.Debug)
 			{
@@ -240,7 +240,7 @@ namespace Speedtest
 			return results;
 		}
 
-		public static async Task<(double ping, long kbit, string host)> Run(string server)
+		public static async Task<Result> Run(string server)
 		{
 			var ping = await GetPing(server, Settings.PingCount);
 
@@ -289,23 +289,31 @@ namespace Speedtest
 					Console.CursorVisible = true;
 				}
 
-				return (ping, kbit, server);
+				return new Result
+				{
+					Ping = ping, 
+					DownloadSpeed = kbit,
+					Host =  server,
+					Timestamp = DateTimeOffset.Now
+
+				};
 
 				async Task Read(int i)
 				{
 					var buffer = new byte[Settings.BufferSize];
-					await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token).ContinueWith(async x =>
-					{
-						var c = await x;
-						counts[i] += c;
-
-						if (c == 0)
+					await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token)
+						.ContinueWith(async x =>
 						{
-							tasks[i] = Task.FromResult(await client.GetStreamAsync(GetUrl(server, Guid.NewGuid())));
-						}
+							var c = await x;
+							counts[i] += c;
 
-						await Read(i);
-					}, source.Token);
+							if (c == 0)
+							{
+								tasks[i] = Task.FromResult(await client.GetStreamAsync(GetUrl(server, Guid.NewGuid())));
+							}
+
+							await Read(i);
+						}, source.Token);
 				}
 			}
 		}

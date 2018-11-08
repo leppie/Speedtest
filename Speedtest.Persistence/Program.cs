@@ -1,6 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Linq;
+﻿using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 
@@ -20,11 +18,8 @@ namespace Speedtest.Persistence
 
 			using (var ctx = new SpeedtestDbContext(configuration))
 			{
-				await ctx.Results.AddRangeAsync(results.Select(r => new Result
-				{
-					Timestamp = DateTimeOffset.Now, Ping = r.ping, DownloadSpeed = r.kbit, Host = r.host,
-					Search = configuration["Search"]
-				}));
+				await ctx.Database.EnsureCreatedAsync();
+				await ctx.Results.AddRangeAsync(results);
 				await ctx.SaveChangesAsync();
 			}
 		}
