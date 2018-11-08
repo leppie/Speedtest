@@ -106,7 +106,7 @@ namespace Speedtest
 		}
 	}
 
-	class Program
+	public class Speedtest
 	{
 		static readonly Settings Settings = new Settings();
 
@@ -192,13 +192,24 @@ namespace Speedtest
 				.AddCommandLine(args);
 
 			var configuration = builder.Build();
+
+			var results = await Run(configuration);
+			return !results.Any() ? 1 : 0;
+		}
+
+		public static async Task<IEnumerable<(double ping, long kbit, string host)>> Run(IConfiguration configuration)
+		{
+			string[] args = { };
+
 			configuration.Bind(Settings);
+
+			var results = new List<(double ping, long kbit, string host)>();
 
 			if (Settings.Debug)
 			{
 				Console.WriteLine(Settings);
 			}
-			
+
 			if (Settings.Servers.Length == 0)
 			{
 				var servers = await GetServers(Settings.Search);
@@ -206,7 +217,7 @@ namespace Speedtest
 				if (!candidates.Any())
 				{
 					Console.Error.WriteLine($"Could not find server: {Settings.Search}");
-					return 1;
+					return results;
 				}
 
 				if (Settings.Debug)
@@ -220,75 +231,83 @@ namespace Speedtest
 			{
 				args = Settings.Servers;
 			}
-			
+
 			foreach (var server in args)
 			{
-				var ping = await GetPing(server, Settings.PingCount);
+				results.Add(await Run(server));
+			}
+
+			return results;
+		}
+
+		public static async Task<(double ping, long kbit, string host)> Run(string server)
+		{
+			var ping = await GetPing(server, Settings.PingCount);
+
+			if (Settings.Interactive)
+			{
+				Console.CursorVisible = false;
+				Update($"{ping,6:f1} ms | {0,8} kbit | {server}");
+			}
+
+			using (var client = new HttpClient())
+			{
+				var tasks = Enumerable.Range(0, Settings.DownloadConnections)
+					.Select(_ => client.GetStreamAsync(GetUrl(server, Guid.NewGuid())))
+					.ToArray();
+				var counts = new int[tasks.Length];
+
+				await Task.WhenAll(tasks);
+
+				var source = new CancellationTokenSource();
+
+				var sw = Stopwatch.StartNew();
+				for (var i = 0; i < tasks.Length; i++)
+				{
+					await Read(i);
+				}
+
+				while (sw.ElapsedMilliseconds < Settings.DownloadTime)
+				{
+					await Task.Delay(50, source.Token);
+					if (Settings.Interactive)
+					{
+						Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
+					}
+				}
+
+				source.Cancel();
+
+				var elapsed = sw.ElapsedMilliseconds;
+				var kbit = (counts.Sum() * 8) / elapsed;
+
+				Update($"{ping,6:f1} ms | {kbit,8} kbit | {server}");
+				Console.WriteLine();
 
 				if (Settings.Interactive)
 				{
-					Console.CursorVisible = false;
-					Update($"{ping,6:f1} ms | {0,8} kbit | {server}");
+					Console.CursorVisible = true;
 				}
 
-				using (var client = new HttpClient())
+				return (ping, kbit, server);
+
+				async Task Read(int i)
 				{
-					var tasks = Enumerable.Range(0, Settings.DownloadConnections)
-						.Select(_ => client.GetStreamAsync(GetUrl(server, Guid.NewGuid())))
-						.ToArray();
-					var counts = new int[tasks.Length];
-
-					await Task.WhenAll(tasks);
-
-					var source = new CancellationTokenSource();
-
-					var sw = Stopwatch.StartNew();
-					for (var i = 0; i < tasks.Length; i++)
+					var buffer = new byte[Settings.BufferSize];
+					await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token).ContinueWith(async x =>
 					{
-						await Read(i);
-					}
+						var c = await x;
+						counts[i] += c;
 
-					while (sw.ElapsedMilliseconds < Settings.DownloadTime)
-					{
-						await Task.Delay(50, source.Token);
-						if (Settings.Interactive)
+						if (c == 0)
 						{
-							Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
+							tasks[i] = Task.FromResult(await client.GetStreamAsync(GetUrl(server, Guid.NewGuid())));
 						}
-					}
 
-					source.Cancel();
-
-					var elapsed = sw.ElapsedMilliseconds;
-
-					Update($"{ping,6:f1} ms | {(counts.Sum() * 8) / elapsed,8} kbit | {server}");
-					Console.WriteLine();
-
-					if (Settings.Interactive)
-					{
-						Console.CursorVisible = true;
-					}
-
-					async Task Read(int i)
-					{
-						var buffer = new byte[Settings.BufferSize];
-						await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token).ContinueWith(async x =>
-						{
-							var c = await x;
-							counts[i] += c;
-
-							if (c == 0)
-							{
-								tasks[i] = Task.FromResult(await client.GetStreamAsync(GetUrl(server, Guid.NewGuid())));
-							}
-
-							await Read(i);
-						}, source.Token);
-					}
+						await Read(i);
+					}, source.Token);
 				}
 			}
-
-			return 0;
 		}
 
 		private static void Update(string msg, int left = 0)
