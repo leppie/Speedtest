@@ -122,6 +122,8 @@ namespace Speedtest
 
 			public double ping { get; set; } = double.MaxValue;
 
+			public string term { get; set; }
+
 			public override string ToString()
 			{
 				return $"{sponsor,-36} ({ping,6:f1} ms): {host}";
@@ -199,7 +201,7 @@ namespace Speedtest
 
 		public static async Task<IEnumerable<Result>> Run(IConfiguration configuration)
 		{
-			string[] args = { };
+			var args = new List<Server>();
 
 			configuration.Bind(Settings);
 
@@ -212,24 +214,32 @@ namespace Speedtest
 
 			if (Settings.Servers.Length == 0)
 			{
-				var servers = await GetServers(Settings.Search);
-				var candidates = servers.Take(Settings.CandidateTests).ToArray();
-				if (!candidates.Any())
+				if (Settings.Search == null)
 				{
-					Console.Error.WriteLine($"Could not find server: {Settings.Search}");
-					return results;
+					Settings.Search = string.Empty;
 				}
 
-				if (Settings.Debug)
+				foreach (var term in Settings.Search.Split(','))
 				{
-					Console.WriteLine($"Auto Server(s): {string.Join(", ", candidates.Select(x => x.sponsor))}");
-				}
+					var servers = await GetServers(term);
+					var candidates = servers.Take(Settings.CandidateTests).ToArray();
+					if (!candidates.Any())
+					{
+						Console.Error.WriteLine($"Could not find server: {term}");
+						return results;
+					}
 
-				args = candidates.Select(x => x.host).ToArray();
+					if (Settings.Debug)
+					{
+						Console.WriteLine($"Auto Server(s): {string.Join(", ", candidates.Select(x => x.sponsor))}");
+					}
+
+					args.AddRange(candidates);
+				}
 			}
 			else
 			{
-				args = Settings.Servers;
+				args = Settings.Servers.Select(x => new Server { host = x }).ToList();
 			}
 
 			foreach (var server in args)
@@ -237,84 +247,99 @@ namespace Speedtest
 				results.Add(await Run(server));
 			}
 
-			return results;
+			return results.Where(x => x != null);
 		}
 
-		public static async Task<Result> Run(string server)
+		private static async Task<Result> Run(Server server)
 		{
-			var ping = await GetPing(server, Settings.PingCount);
-
-			if (Settings.Interactive)
+			try
 			{
-				Console.CursorVisible = false;
-				Update($"{ping,6:f1} ms | {0,8} kbit | {server}");
-			}
+				var ping = await GetPing(server.host, Settings.PingCount);
 
-			using (var client = new HttpClient())
-			{
-				var tasks = Enumerable.Range(0, Settings.DownloadConnections)
-					.Select(_ => client.GetStreamAsync(GetUrl(server, Guid.NewGuid())))
-					.ToArray();
-				var counts = new int[tasks.Length];
-
-				await Task.WhenAll(tasks);
-
-				var source = new CancellationTokenSource();
-
-				var sw = Stopwatch.StartNew();
-				for (var i = 0; i < tasks.Length; i++)
+				if (Settings.Interactive)
 				{
-					await Read(i);
+					Console.CursorVisible = false;
+					Update($"{ping,6:f1} ms | {0,8} kbit | {server.host}");
 				}
 
-				while (sw.ElapsedMilliseconds < Settings.DownloadTime)
+				using (var client = new HttpClient())
 				{
-					await Task.Delay(50, source.Token);
+					var tasks = Enumerable.Range(0, Settings.DownloadConnections)
+						.Select(_ => client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())))
+						.ToArray();
+					var counts = new int[tasks.Length];
+
+					await Task.WhenAll(tasks);
+
+					var source = new CancellationTokenSource();
+
+					var sw = Stopwatch.StartNew();
+					for (var i = 0; i < tasks.Length; i++)
+					{
+						await Read(i);
+					}
+
+					while (sw.ElapsedMilliseconds < Settings.DownloadTime)
+					{
+						await Task.Delay(50, source.Token);
+						if (Settings.Interactive)
+						{
+							Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
+						}
+					}
+
+					source.Cancel();
+
+					var elapsed = sw.ElapsedMilliseconds;
+					var kbit = (counts.Sum() * 8) / elapsed;
+
+					Update($"{ping,6:f1} ms | {kbit,8} kbit | {server.host}");
+					Console.WriteLine();
+
 					if (Settings.Interactive)
 					{
-						Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
+						Console.CursorVisible = true;
+					}
+
+					return new Result
+					{
+						Ping = ping,
+						DownloadSpeed = kbit,
+						Host = server.host,
+						Timestamp = DateTimeOffset.Now,
+						Search = string.IsNullOrEmpty(server.term) ? server.name : server.term
+					};
+
+					async Task Read(int i)
+					{
+						var buffer = new byte[Settings.BufferSize];
+						await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token)
+							.ContinueWith(async x =>
+							{
+								var c = await x;
+								counts[i] += c;
+
+								if (c == 0)
+								{
+									tasks[i] = Task.FromResult(
+										await client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())));
+								}
+
+								await Read(i);
+							}, source.Token);
 					}
 				}
-
-				source.Cancel();
-
-				var elapsed = sw.ElapsedMilliseconds;
-				var kbit = (counts.Sum() * 8) / elapsed;
-
-				Update($"{ping,6:f1} ms | {kbit,8} kbit | {server}");
+			}
+			catch (Exception)
+			{
+				Update($"{"ERROR",6} ms | {"ERROR",8} kbit | {server.host}");
 				Console.WriteLine();
 
 				if (Settings.Interactive)
 				{
 					Console.CursorVisible = true;
 				}
-
-				return new Result
-				{
-					Ping = ping, 
-					DownloadSpeed = kbit,
-					Host =  server,
-					Timestamp = DateTimeOffset.Now
-
-				};
-
-				async Task Read(int i)
-				{
-					var buffer = new byte[Settings.BufferSize];
-					await tasks[i].Result.ReadAsync(buffer, 0, buffer.Length, source.Token)
-						.ContinueWith(async x =>
-						{
-							var c = await x;
-							counts[i] += c;
-
-							if (c == 0)
-							{
-								tasks[i] = Task.FromResult(await client.GetStreamAsync(GetUrl(server, Guid.NewGuid())));
-							}
-
-							await Read(i);
-						}, source.Token);
-				}
+				return null;
 			}
 		}
 
@@ -330,7 +355,7 @@ namespace Speedtest
 
 		private static async Task<IEnumerable<Server>> GetServers(string search)
 		{
-			var url = $"https://www.speedtest.net/api/js/servers?search={search}";
+			var url = $"https://www.speedtest.net/api/js/servers?search={search}&https_functional=1&limit=100";
 			using (var client = new HttpClient())
 			{
 				var result = await client.GetStringAsync(url);
@@ -344,6 +369,7 @@ namespace Speedtest
 				{
 					if (server.https_functional == 1 && !check.Contains(server))
 					{
+						server.term = search;
 						servers.Add(server);
 						check.Add(server);
 					}
@@ -431,7 +457,7 @@ namespace Speedtest
 						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
 				}
 
-				return pingTimes.Where(x => x != 0).Average();
+				return pingTimes.Where(x => x != 0 && x < double.MaxValue).Average();
 			}
 		}
 
