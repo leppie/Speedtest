@@ -256,6 +256,14 @@ namespace Speedtest
 			{
 				var ping = await GetPing(server.host, Settings.PingCount);
 
+				if (ping == 0 || ping == double.MaxValue)
+				{
+					Update($"{"ERROR",6} ms | {"ERROR",8} kbit | {server.host}");
+					Console.WriteLine();
+
+					return null;
+				}
+
 				if (Settings.Interactive)
 				{
 					Console.CursorVisible = false;
@@ -450,14 +458,14 @@ namespace Speedtest
 						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} data: [{string.Join(",", pingTimes)}]");
 				}
 
-				pingTimes = pingTimes.RemoveUpperOutliers().ToArray();
+				pingTimes = pingTimes.Where(x => x != 0 && x < double.MaxValue).ToArray().RemoveUpperOutliers().ToArray();
 				if (Settings.Debug)
 				{
 					Console.WriteLine(
 						$"avg: {pingTimes.Average():f3} min: {pingTimes.Min()} max: {pingTimes.Max()} sd: {pingTimes.StdDev():f2} var: {pingTimes.Variance():f2} count: {pingTimes.Length} data: [{string.Join(",", pingTimes)}]");
 				}
 
-				return pingTimes.Where(x => x != 0 && x < double.MaxValue).Average();
+				return pingTimes.Average();
 			}
 		}
 
