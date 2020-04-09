@@ -190,7 +190,7 @@ namespace Speedtest
 		{
 			var builder = new ConfigurationBuilder()
 				.SetBasePath(Directory.GetCurrentDirectory())
-				.AddJsonFile("appsettings.json")
+				.AddJsonFile("appsettings.json", optional: true)
 				.AddCommandLine(args);
 
 			var configuration = builder.Build();
