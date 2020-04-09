@@ -25,6 +25,7 @@ namespace Speedtest
 		public int CandidateCount { get; set; } = 8;
 		public int CandidatePingMax { get; set; } = 8;
 		public int CandidateTests { get; set; } = 1;
+		public bool Verbose { get; set; } = false;
 
 		public override string ToString()
 		{
@@ -37,6 +38,7 @@ namespace Speedtest
 {nameof(CandidatePingMax),-24}: {CandidatePingMax}
 {nameof(CandidateTests),-24}: {CandidateTests}
 {nameof(Debug),-24}: {Debug}
+{nameof(Verbose),-24}: {Verbose}
 {nameof(Interactive),-24}: {Interactive}
 {nameof(Search),-24}: ""{Search}""
 {nameof(Servers),-24}: [{string.Join(", ", Servers)}]
@@ -406,7 +408,7 @@ namespace Speedtest
 
 				servers = servers.OrderBy(x => x.ping).Take(Settings.CandidateCount).Where(x => x.ping < double.MaxValue).ToList();
 
-				if (Settings.Debug)
+				if (Settings.Debug || Settings.Verbose)
 				{
 					Console.WriteLine($"Server search: {search}");
 					foreach (var svr in servers)
