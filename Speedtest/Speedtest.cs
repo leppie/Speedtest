@@ -15,15 +15,15 @@ namespace Speedtest
 	class Settings
 	{
 		public int DownloadTime { get; set; } = 5000;
-		public int DownloadConnections { get; set; } = 6;
+		public int DownloadConnections { get; set; } = 4;
 		public int BufferSize { get; set; } = 4096;
-		public int PingCount { get; set; } = 20;
+		public int PingCount { get; set; } = 10;
 		public string[] Servers { get; set; } = { };
 		public string Search { get; set; }
 		public bool Debug { get; set; } = false;
 		public bool Interactive { get; set; } = true;
-		public int CandidateCount { get; set; } = 8;
-		public int CandidatePingMax { get; set; } = 8;
+		public int CandidateCount { get; set; } = 5;
+		public int CandidatePingMax { get; set; } = 5;
 		public int CandidateTests { get; set; } = 1;
 		public bool Verbose { get; set; } = false;
 
