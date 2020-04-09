@@ -392,7 +392,7 @@ namespace Speedtest
 					{
 						try
 						{
-							await client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid()));
+							await client.GetAsync(GetUrl(server.host, Guid.NewGuid()), HttpCompletionOption.ResponseHeadersRead);
 						}
 						catch (Exception e)
 						{
