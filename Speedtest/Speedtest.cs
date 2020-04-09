@@ -365,7 +365,7 @@ namespace Speedtest
 
 		private static async Task<IEnumerable<Server>> GetServers(string search)
 		{
-			var url = $"https://www.speedtest.net/api/js/servers?search={search}&https_functional=1&limit=100";
+			var url = $"https://www.speedtest.net/api/js/servers?search={search}&https_functional=1&limit={Settings.CandidateCount + 5}";
 			using (var client = new HttpClient())
 			{
 				var result = await client.GetStringAsync(url);
