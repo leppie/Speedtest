@@ -380,7 +380,7 @@ namespace Speedtest
 
 				foreach (var server in allservers)
 				{
-					if (server.https_functional == 1 && !check.Contains(server))
+					if (!check.Contains(server))
 					{
 						server.term = search;
 						servers.Add(server);
