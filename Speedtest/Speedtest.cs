@@ -277,7 +277,7 @@ namespace Speedtest
 					var tasks = Enumerable.Range(0, Settings.DownloadConnections)
 						.Select(_ => client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())))
 						.ToArray();
-					var counts = new int[tasks.Length];
+					var counts = new long[tasks.Length];
 
 					await Task.WhenAll(tasks);
 
