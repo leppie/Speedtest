@@ -272,7 +272,10 @@ namespace Speedtest
 					Update($"{ping,6:f1} ms | {0,8} kbit | {server.host}");
 				}
 
-				using (var client = new HttpClient())
+				using (var client = new HttpClient(new HttpClientHandler
+				{
+					ServerCertificateCustomValidationCallback = (a, b, c, d) => true
+				}))
 				{
 					var tasks = Enumerable.Range(0, Settings.DownloadConnections)
 						.Select(_ => client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())))
