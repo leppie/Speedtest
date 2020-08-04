@@ -108,6 +108,17 @@ namespace Speedtest
 		}
 	}
 
+	class HttpClient : System.Net.Http.HttpClient
+    {
+        public HttpClient() : base(new HttpClientHandler
+		{
+			ServerCertificateCustomValidationCallback = (a, b, c, d) => true
+		})
+        {
+			DefaultRequestHeaders.Add("User-Agent", "Wget/1.19.4 (linux-gnu)");
+		}
+    }
+
 	public class Speedtest
 	{
 		static readonly Settings Settings = new Settings();
@@ -272,13 +283,10 @@ namespace Speedtest
 					Update($"{ping,6:f1} ms | {0,8} kbit | {server.host}");
 				}
 
-				using (var client = new HttpClient(new HttpClientHandler
-				{
-					ServerCertificateCustomValidationCallback = (a, b, c, d) => true
-				}))
+				using (var client = new HttpClient())
 				{
 					var tasks = Enumerable.Range(0, Settings.DownloadConnections)
-						.Select(_ => client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())))
+						.Select(_ => client.GetStreamAsync(GetUrl(server.host)))
 						.ToArray();
 					var counts = new long[tasks.Length];
 
@@ -297,7 +305,7 @@ namespace Speedtest
 						await Task.Delay(50, source.Token);
 						if (Settings.Interactive)
 						{
-							Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
+                            Update($"{(counts.Sum() * 8) / sw.ElapsedMilliseconds,8} kbit", 12);
 						}
 					}
 
@@ -306,16 +314,16 @@ namespace Speedtest
 					var elapsed = sw.ElapsedMilliseconds;
 					var kbit = (counts.Sum() * 8) / elapsed;
 
-					Update($"{ping,6:f1} ms | {kbit,8} kbit | {server.host}");
-					Console.WriteLine();
+                    Update($"{ping,6:f1} ms | {kbit,8} kbit | {server.host}");
+                    Console.WriteLine();
 
 					if (Settings.Interactive)
 					{
-						Console.CursorVisible = true;
+                        Console.CursorVisible = true;
 					}
 
 					return new Result
-					{
+                    {
 						Ping = ping,
 						DownloadSpeed = kbit,
 						Host = server.host,
@@ -335,7 +343,7 @@ namespace Speedtest
 								if (c == 0)
 								{
 									tasks[i] = Task.FromResult(
-										await client.GetStreamAsync(GetUrl(server.host, Guid.NewGuid())));
+										await client.GetStreamAsync(GetUrl(server.host)));
 								}
 
 								await Read(i);
@@ -395,13 +403,15 @@ namespace Speedtest
 					{
 						try
 						{
-							await client.GetAsync(GetUrl(server.host, Guid.NewGuid()), HttpCompletionOption.ResponseHeadersRead);
+							var turl = GetUrl(server.host);
+							var k = await client.GetAsync(turl, HttpCompletionOption.ResponseHeadersRead);
+							k.EnsureSuccessStatusCode();
 						}
 						catch (Exception e)
 						{
 							if (Settings.Debug)
 							{
-								Console.WriteLine(e);
+                                Console.WriteLine(e);
 							}
 
 							server.ping = double.MaxValue;
@@ -413,12 +423,12 @@ namespace Speedtest
 
 				if (Settings.Debug || Settings.Verbose)
 				{
-					Console.WriteLine($"Server search: {search}");
+                    Console.WriteLine($"Server search: {search}");
 					foreach (var svr in servers)
 					{
-						Console.WriteLine(svr);
+                        Console.WriteLine(svr);
 					}
-					Console.WriteLine();
+                    Console.WriteLine();
 				}
 
 				return servers;
@@ -474,10 +484,12 @@ namespace Speedtest
 			}
 		}
 
-		static string GetUrl(string server, Guid guid)
+		static Guid sguid = Guid.NewGuid();
+
+		static string GetUrl(string server)
 		{
 			return
-				$"https://{server}/download?nocache={guid}&size=25000000";
+				$"http://{server}/download?nocache={Guid.NewGuid()}&size=25000000";
 		}
 	}
 }
